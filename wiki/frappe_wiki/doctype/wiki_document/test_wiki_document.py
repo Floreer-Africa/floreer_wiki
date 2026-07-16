@@ -1291,6 +1291,73 @@ class TestWikiDocumentPdfDownload(WikiDocumentTestBase):
 		self.assertIn("<h2", page.rendered_content_for_pdf)
 
 
+class TestPrivatePageStaffOnly(WikiDocumentTestBase):
+	"""Floreer vendored patch (framework#122): a private wiki page is staff-only.
+
+	Upstream ``check_guest_access`` blocks only Guests; the patch also refuses a
+	logged-in non-System User (e.g. a portal Website User) so an internal wiki space
+	can stay published without leaking to webshop customers.
+	"""
+
+	WEBSITE_USER = "wiki-website-user@floreer.test"
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		if frappe.db.exists("User", self.WEBSITE_USER):
+			frappe.delete_doc("User", self.WEBSITE_USER, force=True)
+		super().tearDown()
+
+	def _private_page(self):
+		root_group = create_test_wiki_document(self, "Root Private StaffOnly", is_group=True)
+		return create_test_wiki_document(
+			self, "Private Staff Page", parent=root_group.name, is_private=True
+		)
+
+	def _make_website_user(self):
+		"""A genuine portal Website User. The wiki app's User after_insert hook adds
+		a desk role and promotes new users to System User; on Floreer prod
+		floreer_app's force_portal_shape (#157) keeps portal customers Website Users,
+		so force user_type back here to simulate that real state."""
+		frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": self.WEBSITE_USER,
+				"first_name": "Wiki",
+				"user_type": "Website User",
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value("User", self.WEBSITE_USER, "user_type", "Website User")
+		return self.WEBSITE_USER
+
+	def test_system_user_can_view_private_page(self):
+		"""A System User (staff) passes the private-page guard."""
+		page = self._private_page()
+		frappe.set_user("Administrator")  # a System User
+		page.check_guest_access()  # must not raise
+
+	def test_guest_blocked_from_private_page(self):
+		"""A Guest is blocked (upstream behaviour, preserved)."""
+		page = self._private_page()
+		frappe.set_user("Guest")
+		with self.assertRaises(frappe.PermissionError):
+			page.check_guest_access()
+
+	def test_website_user_blocked_from_private_page(self):
+		"""A logged-in Website User (portal customer) is blocked (Floreer patch)."""
+		page = self._private_page()
+		frappe.set_user(self._make_website_user())
+		with self.assertRaises(frappe.PermissionError):
+			page.check_guest_access()
+
+	def test_non_private_page_open_to_website_user(self):
+		"""A published, non-private page is unaffected — Website Users still see it."""
+		root_group = create_test_wiki_document(self, "Root Public StaffOnly", is_group=True)
+		page = create_test_wiki_document(self, "Public Page", parent=root_group.name)
+		frappe.set_user(self._make_website_user())
+		page.check_guest_access()  # must not raise
+
+
 def _make_request(test_client, method, path, **kwargs):
 	"""Run a werkzeug test-client request in a thread (mirrors frappe test_api pattern)."""
 	site = frappe.local.site

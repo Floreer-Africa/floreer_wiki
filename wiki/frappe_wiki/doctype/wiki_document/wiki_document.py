@@ -240,11 +240,25 @@ class WikiDocument(NestedSet):
 		Check if the current user has permission to view this document.
 		Raises PermissionError if access is denied.
 		"""
-		if self.is_private and frappe.session.user == "Guest":
-			frappe.throw(
-				frappe._("You must be logged in to view this page"),
-				frappe.PermissionError,
-			)
+		if self.is_private:
+			# Floreer vendored patch (framework#122): a private wiki page is
+			# STAFF-ONLY. Upstream blocks only Guests; we ALSO refuse a logged-in
+			# non-System User (e.g. a webshop / portal Website User) so an internal
+			# wiki space can stay published (keep the nice reading view) without
+			# leaking to customers. Re-verify after any wiki upstream-sync.
+			if frappe.session.user == "Guest":
+				frappe.throw(
+					frappe._("You must be logged in to view this page"),
+					frappe.PermissionError,
+				)
+			if (
+				frappe.db.get_value("User", frappe.session.user, "user_type")
+				!= "System User"
+			):
+				frappe.throw(
+					frappe._("You are not permitted to view this page"),
+					frappe.PermissionError,
+				)
 
 	def check_published(self):
 		if not self.is_published:
