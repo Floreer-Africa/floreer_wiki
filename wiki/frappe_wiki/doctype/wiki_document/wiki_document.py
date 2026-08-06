@@ -382,7 +382,7 @@ class WikiDocument(NestedSet):
 		# which on this site is 331 Website Users.
 		#
 		# Longer term the upstream-native answer is to configure the Wiki Space with
-		# staff role rows and drop this patch (see framework#155). Until that config
+		# staff role rows and drop this patch (see framework#159). Until that config
 		# exists in production, this guard is what holds.
 		if self.is_private and frappe.session.user != "Administrator":
 			if (
